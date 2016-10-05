@@ -16,26 +16,40 @@ package im.delight.android.ddp;
  * limitations under the License.
  */
 
-import im.delight.android.ddp.db.DataStore;
-import im.delight.android.ddp.db.Database;
-import java.net.URI;
-import android.content.SharedPreferences;
+import android.content.BroadcastReceiver;
 import android.content.Context;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.Queue;
-import java.util.Iterator;
-import org.codehaus.jackson.map.ObjectMapper;
-import java.util.UUID;
-import java.util.Arrays;
-import java.io.IOException;
-import org.codehaus.jackson.JsonProcessingException;
-import org.codehaus.jackson.JsonNode;
-import java.util.HashMap;
-import java.util.Map;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.os.Handler;
+import android.os.Looper;
+
 import com.firebase.tubesock.WebSocket;
 import com.firebase.tubesock.WebSocketEventHandler;
-import com.firebase.tubesock.WebSocketMessage;
 import com.firebase.tubesock.WebSocketException;
+import com.firebase.tubesock.WebSocketMessage;
+
+import org.codehaus.jackson.JsonNode;
+import org.codehaus.jackson.JsonProcessingException;
+import org.codehaus.jackson.map.ObjectMapper;
+
+import java.io.IOException;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+import im.delight.android.ddp.db.DataStore;
+import im.delight.android.ddp.db.Database;
 
 /** Client that connects to Meteor servers implementing the DDP protocol */
 public class Meteor {
@@ -43,18 +57,18 @@ public class Meteor {
 	private static final String TAG = "Meteor";
 	/** Supported versions of the DDP protocol in order of preference */
 	private static final String[] SUPPORTED_DDP_VERSIONS = { "1", "pre2", "pre1" };
-	/** The maximum number of attempts to re-connect to the server over WebSocket */
-	private static final int RECONNECT_ATTEMPTS_MAX = 5;
 	/** Instance of Jackson library's ObjectMapper that converts between JSON and Java objects (POJOs) */
 	private static final ObjectMapper mObjectMapper = new ObjectMapper();
 	/** The WebSocket connection that will be used for the data transfer */
 	private WebSocket mWebSocket;
 	/** The callback that handles messages and events received from the WebSocket connection */
 	private final WebSocketEventHandler mWebSocketEventHandler;
+	/** Map that tracks all subscriptions used */
+	private final Map<String, Map<String, Object>> mSubscriptions;
 	/** Map that tracks all pending Listener instances */
 	private final Map<String, Listener> mListeners;
 	/** Messages that couldn't be dispatched yet and thus had to be queued */
-	private final Queue<String> mQueuedMessages;
+	private final Queue<String[]> mQueuedMessages;
 	private final Context mContext;
 	/** Whether logging should be enabled or not */
 	private static boolean mLoggingEnabled;
@@ -68,6 +82,8 @@ public class Meteor {
 	private boolean mConnected;
 	private String mLoggedInUserId;
 	private final DataStore mDataStore;
+
+	private boolean mReconnecting;
 
 	/**
 	 * Returns a new instance for a client connecting to a server via DDP over websocket
@@ -141,6 +157,7 @@ public class Meteor {
 				log("  onOpen");
 
 				mConnected = true;
+				mReconnecting = false;
 				mReconnectAttempts = 0;
 				initConnection(mSessionID);
 			}
@@ -152,17 +169,21 @@ public class Meteor {
 
 				final boolean lostConnection = mConnected;
 				mConnected = false;
-				if (lostConnection) {
+				if (lostConnection || mReconnecting) {
+					mReconnecting = true;
+					long delay = (long)Math.exp(mReconnectAttempts) * 1000;
+					log("    reconnectDelayed " + delay);
+					final Runnable r = new Runnable() {
+						public void run() {
+							log("    reconnect");
+							reconnect();
+						}
+					};
+					new Handler(Looper.getMainLooper()).postDelayed(r, delay);
 					mReconnectAttempts++;
-					if (mReconnectAttempts <= RECONNECT_ATTEMPTS_MAX) {
-						// try to re-connect automatically
-						reconnect();
-					}
-					else {
-						disconnect();
-					}
 				}
 
+				timeoutListeners();
 				mCallbackProxy.onDisconnect();
 			}
 
@@ -191,11 +212,12 @@ public class Meteor {
 
 		};
 
+		mSubscriptions = new ConcurrentHashMap<String, Map<String, Object>>();
 		// create a map that holds the pending Listener instances
-		mListeners = new HashMap<String, Listener>();
+		mListeners = new ConcurrentHashMap<String, Listener>();
 
 		// create a queue that holds undispatched messages waiting to be sent
-		mQueuedMessages = new ConcurrentLinkedQueue<String>();
+		mQueuedMessages = new ConcurrentLinkedQueue<String[]>();
 
 		// save the server URI
 		mServerUri = serverUri;
@@ -203,6 +225,72 @@ public class Meteor {
 		mDdpVersion = protocolVersion;
 		// count the number of failed attempts to re-connect
 		mReconnectAttempts = 0;
+	}
+
+	private BroadcastReceiver networkBroadcastReceiver;
+
+	private void registerForNetworkIntent() {
+		IntentFilter networkIntentFilter = new IntentFilter();
+		networkIntentFilter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
+		this.networkBroadcastReceiver = new BroadcastReceiver() {
+			@Override
+			public void onReceive(Context context, Intent intent) {
+				log(TAG);
+				log("  network");
+				if (isNetworkAvailable()) {
+					log("    available");
+					if (!mConnected) reconnect();
+				} else {
+					log("    notAvailable");
+					if (mWebSocket != null) {
+						try {
+							mWebSocket.close();
+						} catch (Exception e) {
+							mCallbackProxy.onException(e);
+						}
+						mWebSocket.setEventHandler(new WebSocketEventHandler() {
+							@Override
+							public void onOpen() {
+
+							}
+
+							@Override
+							public void onMessage(WebSocketMessage webSocketMessage) {
+
+							}
+
+							@Override
+							public void onClose() {
+
+							}
+
+							@Override
+							public void onError(WebSocketException e) {
+
+							}
+
+							@Override
+							public void onLogMessage(String s) {
+
+							}
+						});
+						mWebSocket = null;
+						mWebSocketEventHandler.onClose();
+					}
+				}
+			}
+		};
+		this.mContext.registerReceiver(networkBroadcastReceiver, networkIntentFilter);
+	}
+
+	private void unregisterForNetworkIntent() {
+		this.mContext.unregisterReceiver(this.networkBroadcastReceiver);
+	}
+
+	private boolean isNetworkAvailable() {
+		final ConnectivityManager connectivityManager = (ConnectivityManager) this.mContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+		final NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
+		return networkInfo != null && networkInfo.isAvailable() && networkInfo.isConnected();
 	}
 
 	/** Attempts to establish the connection to the server */
@@ -235,6 +323,8 @@ public class Meteor {
 				initConnection(mSessionID);
 				return;
 			}
+		} else {
+			this.registerForNetworkIntent();
 		}
 
 		// create a new WebSocket connection for the data transfer
@@ -264,12 +354,15 @@ public class Meteor {
 		if (existingSessionID != null) {
 			data.put(Protocol.Field.SESSION, existingSessionID);
 		}
-		send(data);
+		send(data, existingSessionID);
 	}
 
 	/** Disconnect the client from the server */
 	public void disconnect() {
+		this.unregisterForNetworkIntent();
 		mConnected = false;
+		mReconnecting = false;
+		mSubscriptions.clear();
 		mListeners.clear();
 		mSessionID = null;
 
@@ -286,12 +379,35 @@ public class Meteor {
 		}
 	}
 
+	private void timeoutListeners() {
+		Iterator<String> listenersIdIterator = mListeners.keySet().iterator();
+		while (listenersIdIterator.hasNext()) {
+			String listenerId = listenersIdIterator.next();
+			boolean isQueued = false;
+			Iterator<String[]> queuedMessagesIterator = mQueuedMessages.iterator();
+			while (queuedMessagesIterator.hasNext()) {
+				String[] queuedMessage = queuedMessagesIterator.next();
+				if (listenerId.equals(queuedMessage[0])) {
+					isQueued = true;
+					break;
+				}
+			}
+			if (!isQueued) {
+				Listener listener = mListeners.get(listenerId);
+				if (listener instanceof ResultListener) {
+					mCallbackProxy.forResultListener((ResultListener) listener).onError("522", "Connection Timed Out", null);
+					mListeners.remove(listenerId);
+				}
+			}
+		}
+	}
+
 	/**
 	 * Sends a Java object (POJO) over the websocket after serializing it with the Jackson library
 	 *
 	 * @param obj the Java object to send
 	 */
-	private void send(final Object obj) {
+	private void send(final Object obj, String id) {
 		// serialize the object to JSON
 		final String jsonStr = toJson(obj);
 
@@ -300,7 +416,7 @@ public class Meteor {
 		}
 
 		// send the JSON string
-		send(jsonStr);
+		send(jsonStr, id);
 	}
 
 	/**
@@ -308,7 +424,7 @@ public class Meteor {
 	 *
 	 * @param message the string to send
 	 */
-	private void send(final String message) {
+	private void send(final String message, String id) {
 		log(TAG);
 		log("  send");
 		log("    message == "+message);
@@ -329,7 +445,7 @@ public class Meteor {
 		}
 		else {
 			log("    queueing");
-			mQueuedMessages.add(message);
+			mQueuedMessages.add(new String[]{id, message});
 		}
 	}
 
@@ -449,7 +565,6 @@ public class Meteor {
 					else {
 						id = null;
 					}
-
 					sendPong(id);
 				}
 				else if (message.equals(Protocol.Message.ADDED) || message.equals(Protocol.Message.ADDED_BEFORE)) {
@@ -689,7 +804,7 @@ public class Meteor {
 		if (id != null) {
 			data.put(Protocol.Field.ID, id);
 		}
-		send(data);
+		send(data, id);
 	}
 
 	/**
@@ -1037,7 +1152,7 @@ public class Meteor {
 		if (randomSeed != null) {
 			data.put(Protocol.Field.RANDOM_SEED, randomSeed);
 		}
-		send(data);
+		send(data, callId);
 	}
 
 	/**
@@ -1086,7 +1201,8 @@ public class Meteor {
 		if (params != null) {
 			data.put(Protocol.Field.PARAMS, params);
 		}
-		send(data);
+		mSubscriptions.put(subscriptionId, data);
+		send(data, subscriptionId);
 
 		// return the generated subscription ID
 		return subscriptionId;
@@ -1117,7 +1233,18 @@ public class Meteor {
 		final Map<String, Object> data = new HashMap<String, Object>();
 		data.put(Protocol.Field.MESSAGE, Protocol.Message.UNSUBSCRIBE);
 		data.put(Protocol.Field.ID, subscriptionId);
-		send(data);
+		send(data, subscriptionId);
+		mSubscriptions.remove(subscriptionId);
+	}
+
+	public void unsubscribeAll() {
+		Iterator<String> subscriptionsIdIterator = mSubscriptions.keySet().iterator();
+		while (subscriptionsIdIterator.hasNext()) {
+			String subscriptionId = subscriptionsIdIterator.next();
+			Map<String, Object> subscription = mSubscriptions.get(subscriptionId);
+			send(subscription, (String)subscription.get(Protocol.Field.ID));
+			mSubscriptions.remove(subscriptionId);
+		}
 	}
 
 	/**
@@ -1202,8 +1329,29 @@ public class Meteor {
 		mCallbackProxy.onConnect(signedInAutomatically);
 
 		// try to dispatch queued messages now
-		for (String queuedMessage : mQueuedMessages) {
-			send(queuedMessage);
+		this.unqueueMessages();
+		this.restoreSubscriptions();
+	}
+
+	private void unqueueMessages() {
+		log(TAG);
+		log("  unqueuingMessages");
+		List<String[]> queuedMessages = new ArrayList<String[]>(mQueuedMessages);
+		mQueuedMessages.clear();
+		Iterator<String[]> queuedMessagesIterator = queuedMessages.iterator();
+		while (queuedMessagesIterator.hasNext()) {
+			String[] queuedMessage = queuedMessagesIterator.next();
+			send(queuedMessage[1], queuedMessage[0]);
+		}
+	}
+
+	private void restoreSubscriptions() {
+		log(TAG);
+		log("  restoringSubscriptions");
+		Iterator<Map<String, Object>> subscriptionsIterator = mSubscriptions.values().iterator();
+		while (subscriptionsIterator.hasNext()) {
+			Map<String, Object> subscription = subscriptionsIterator.next();
+			send(subscription, (String)subscription.get(Protocol.Field.ID));
 		}
 	}
 
