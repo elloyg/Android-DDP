@@ -18,13 +18,17 @@ package im.delight.android.ddp;
 
 import android.os.Handler;
 import android.os.Looper;
+
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /** Wrapper that executes all registered callbacks on the correct thread behind the scenes */
 public class CallbackProxy implements MeteorCallback {
 
-	private final List<MeteorCallback> mCallbacks = new LinkedList<MeteorCallback>();
+	private final Queue<MeteorCallback> mCallbacks = new ConcurrentLinkedQueue<MeteorCallback>();
 	private final Handler mUiHandler = new Handler(Looper.getMainLooper());
 
 	public CallbackProxy() { }
@@ -44,7 +48,9 @@ public class CallbackProxy implements MeteorCallback {
 	@Override
 	public void onConnect(final boolean signedInAutomatically) {
 		// iterate over all the registered callbacks
-		for (final MeteorCallback callback : mCallbacks) {
+		Iterator<MeteorCallback> callbacksIterator = mCallbacks.iterator();
+		while (callbacksIterator.hasNext()) {
+			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
 				// execute the callback on the main thread
@@ -64,7 +70,9 @@ public class CallbackProxy implements MeteorCallback {
 	@Override
 	public void onDisconnect() {
 		// iterate over all the registered callbacks
-		for (final MeteorCallback callback : mCallbacks) {
+		Iterator<MeteorCallback> callbacksIterator = mCallbacks.iterator();
+		while (callbacksIterator.hasNext()) {
+			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
 				// execute the callback on the main thread
@@ -84,7 +92,9 @@ public class CallbackProxy implements MeteorCallback {
 	@Override
 	public void onDataAdded(final String collectionName, final String documentID, final String newValuesJson) {
 		// iterate over all the registered callbacks
-		for (final MeteorCallback callback : mCallbacks) {
+		Iterator<MeteorCallback> callbacksIterator = mCallbacks.iterator();
+		while (callbacksIterator.hasNext()) {
+			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
 				// execute the callback on the main thread
@@ -104,7 +114,9 @@ public class CallbackProxy implements MeteorCallback {
 	@Override
 	public void onDataChanged(final String collectionName, final String documentID, final String updatedValuesJson, final String removedValuesJson) {
 		// iterate over all the registered callbacks
-		for (final MeteorCallback callback : mCallbacks) {
+		Iterator<MeteorCallback> callbacksIterator = mCallbacks.iterator();
+		while (callbacksIterator.hasNext()) {
+			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
 				// execute the callback on the main thread
@@ -124,7 +136,9 @@ public class CallbackProxy implements MeteorCallback {
 	@Override
 	public void onDataRemoved(final String collectionName, final String documentID) {
 		// iterate over all the registered callbacks
-		for (final MeteorCallback callback : mCallbacks) {
+		Iterator<MeteorCallback> callbacksIterator = mCallbacks.iterator();
+		while (callbacksIterator.hasNext()) {
+			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
 				// execute the callback on the main thread
@@ -144,7 +158,9 @@ public class CallbackProxy implements MeteorCallback {
 	@Override
 	public void onException(final Exception e) {
 		// iterate over all the registered callbacks
-		for (final MeteorCallback callback : mCallbacks) {
+		Iterator<MeteorCallback> callbacksIterator = mCallbacks.iterator();
+		while (callbacksIterator.hasNext()) {
+			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
 				// execute the callback on the main thread
