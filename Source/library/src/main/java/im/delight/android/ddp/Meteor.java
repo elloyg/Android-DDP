@@ -64,11 +64,11 @@ public class Meteor {
 	/** The callback that handles messages and events received from the WebSocket connection */
 	private final WebSocketEventHandler mWebSocketEventHandler;
 	/** Map that tracks all subscriptions used */
-	private final Map<String, Map<String, Object>> mSubscriptions;
+	private final Map<String, Subscription> mSubscriptions;
 	/** Map that tracks all pending Listener instances */
 	private final Map<String, Listener> mListeners;
 	/** Messages that couldn't be dispatched yet and thus had to be queued */
-	private final Queue<String[]> mQueuedMessages;
+	private final Queue<Message> mQueuedMessages;
 	private final Context mContext;
 	/** Whether logging should be enabled or not */
 	private static boolean mLoggingEnabled;
@@ -84,6 +84,7 @@ public class Meteor {
 	private final DataStore mDataStore;
 
 	private boolean mReconnecting;
+	private Handler mReconnectHandler;
 
 	/**
 	 * Returns a new instance for a client connecting to a server via DDP over websocket
@@ -149,6 +150,8 @@ public class Meteor {
 		mDataStore = dataStore;
 
 		// create a new handler that processes the messages and events received from the WebSocket connection
+
+		mReconnectHandler = new Handler(Looper.getMainLooper());
 		mWebSocketEventHandler = new WebSocketEventHandler() {
 
 			@Override
@@ -171,15 +174,17 @@ public class Meteor {
 				mConnected = false;
 				if (lostConnection || mReconnecting) {
 					mReconnecting = true;
-					long delay = (long)Math.exp(mReconnectAttempts) * 1000;
+					final long delay = (long)Math.exp(mReconnectAttempts) * 1000;
 					log("    reconnectDelayed " + delay);
 					final Runnable r = new Runnable() {
 						public void run() {
-							log("    reconnect");
+							log("    reconnect after " + delay);
 							reconnect();
 						}
 					};
-					new Handler(Looper.getMainLooper()).postDelayed(r, delay);
+					mReconnectHandler.removeCallbacksAndMessages(null);
+					mReconnectHandler.postDelayed(r, delay);
+
 					mReconnectAttempts++;
 				}
 
@@ -212,12 +217,12 @@ public class Meteor {
 
 		};
 
-		mSubscriptions = new ConcurrentHashMap<String, Map<String, Object>>();
+		mSubscriptions = new ConcurrentHashMap<String, Subscription>();
 		// create a map that holds the pending Listener instances
 		mListeners = new ConcurrentHashMap<String, Listener>();
 
 		// create a queue that holds undispatched messages waiting to be sent
-		mQueuedMessages = new ConcurrentLinkedQueue<String[]>();
+		mQueuedMessages = new ConcurrentLinkedQueue<Message>();
 
 		// save the server URI
 		mServerUri = serverUri;
@@ -239,7 +244,11 @@ public class Meteor {
 				log("  network");
 				if (isNetworkAvailable()) {
 					log("    available");
-					if (!mConnected) reconnect();
+					if (!mConnected) {
+						log("    reconnect");
+						mReconnectHandler.removeCallbacksAndMessages(null);
+						reconnect();
+					}
 				} else {
 					log("    notAvailable");
 					if (mWebSocket != null) {
@@ -384,10 +393,10 @@ public class Meteor {
 		while (listenersIdIterator.hasNext()) {
 			String listenerId = listenersIdIterator.next();
 			boolean isQueued = false;
-			Iterator<String[]> queuedMessagesIterator = mQueuedMessages.iterator();
+			Iterator<Message> queuedMessagesIterator = mQueuedMessages.iterator();
 			while (queuedMessagesIterator.hasNext()) {
-				String[] queuedMessage = queuedMessagesIterator.next();
-				if (listenerId.equals(queuedMessage[0])) {
+				Message queuedMessage = queuedMessagesIterator.next();
+				if (listenerId.equals(queuedMessage.getId())) {
 					isQueued = true;
 					break;
 				}
@@ -395,7 +404,7 @@ public class Meteor {
 			if (!isQueued) {
 				Listener listener = mListeners.get(listenerId);
 				if (listener instanceof ResultListener) {
-					mCallbackProxy.forResultListener((ResultListener) listener).onError("522", "Connection Timed Out", null);
+					mCallbackProxy.forResultListener((ResultListener) listener).onError("522", "Timed Out", "DDP Connection closed before receiving result");
 					mListeners.remove(listenerId);
 				}
 			}
@@ -445,7 +454,7 @@ public class Meteor {
 		}
 		else {
 			log("    queueing");
-			mQueuedMessages.add(new String[]{id, message});
+			mQueuedMessages.add(new Message(id, message));
 		}
 	}
 
@@ -714,12 +723,13 @@ public class Meteor {
 							subscriptionId = elements.next().getTextValue();
 
 							final Listener listener = mListeners.get(subscriptionId);
-
 							if (listener instanceof SubscribeListener) {
 								mListeners.remove(subscriptionId);
-
 								mCallbackProxy.forSubscribeListener((SubscribeListener) listener).onSuccess();
 							}
+
+							final Subscription subscription = mSubscriptions.get(subscriptionId);
+							subscription.setReady(true);
 						}
 					}
 				}
@@ -1161,7 +1171,7 @@ public class Meteor {
 	 * @param subscriptionName the name of the subscription
 	 * @return the generated subscription ID (must be used when unsubscribing)
 	 */
-	public String subscribe(final String subscriptionName) {
+	public Subscription subscribe(final String subscriptionName) {
 		return subscribe(subscriptionName, null);
 	}
 
@@ -1172,7 +1182,7 @@ public class Meteor {
 	 * @param params the subscription parameters
 	 * @return the generated subscription ID (must be used when unsubscribing)
 	 */
-	public String subscribe(final String subscriptionName, final Object[] params) {
+	public Subscription subscribe(final String subscriptionName, final Object[] params) {
 		return subscribe(subscriptionName, params, null);
 	}
 
@@ -1184,7 +1194,7 @@ public class Meteor {
 	 * @param listener the listener to call on success/error
 	 * @return the generated subscription ID (must be used when unsubscribing)
 	 */
-	public String subscribe(final String subscriptionName, final Object[] params, final SubscribeListener listener) {
+	public Subscription subscribe(final String subscriptionName, final Object[] params, final SubscribeListener listener) {
 		// create a new unique ID for this request
 		final String subscriptionId = uniqueID();
 
@@ -1201,11 +1211,12 @@ public class Meteor {
 		if (params != null) {
 			data.put(Protocol.Field.PARAMS, params);
 		}
-		mSubscriptions.put(subscriptionId, data);
+		Subscription subscription = new Subscription(data, this.mCallbackProxy);
+		mSubscriptions.put(subscriptionId, subscription);
 		send(data, subscriptionId);
 
 		// return the generated subscription ID
-		return subscriptionId;
+		return subscription;
 	}
 
 	/**
@@ -1241,9 +1252,7 @@ public class Meteor {
 		Iterator<String> subscriptionsIdIterator = mSubscriptions.keySet().iterator();
 		while (subscriptionsIdIterator.hasNext()) {
 			String subscriptionId = subscriptionsIdIterator.next();
-			Map<String, Object> subscription = mSubscriptions.get(subscriptionId);
-			send(subscription, (String)subscription.get(Protocol.Field.ID));
-			mSubscriptions.remove(subscriptionId);
+			this.unsubscribe(subscriptionId);
 		}
 	}
 
@@ -1336,23 +1345,28 @@ public class Meteor {
 	private void unqueueMessages() {
 		log(TAG);
 		log("  unqueuingMessages");
-		List<String[]> queuedMessages = new ArrayList<String[]>(mQueuedMessages);
+		List<Message> queuedMessages = new ArrayList<Message>(mQueuedMessages);
 		mQueuedMessages.clear();
-		Iterator<String[]> queuedMessagesIterator = queuedMessages.iterator();
+		Iterator<Message> queuedMessagesIterator = queuedMessages.iterator();
 		while (queuedMessagesIterator.hasNext()) {
-			String[] queuedMessage = queuedMessagesIterator.next();
-			send(queuedMessage[1], queuedMessage[0]);
+			Message queuedMessage = queuedMessagesIterator.next();
+			send(queuedMessage.getMessage(), queuedMessage.getId());
 		}
 	}
 
 	private void restoreSubscriptions() {
 		log(TAG);
 		log("  restoringSubscriptions");
-		Iterator<Map<String, Object>> subscriptionsIterator = mSubscriptions.values().iterator();
+		Iterator<Subscription> subscriptionsIterator = mSubscriptions.values().iterator();
 		while (subscriptionsIterator.hasNext()) {
-			Map<String, Object> subscription = subscriptionsIterator.next();
-			send(subscription, (String)subscription.get(Protocol.Field.ID));
+			Subscription subscription = subscriptionsIterator.next();
+			subscription.setReady(false);
+			send(subscription.getData(), subscription.getId());
 		}
+	}
+
+	public void handleResponsesOnUIThread(boolean callbacks, boolean results, boolean subscribes) {
+		this.mCallbackProxy.setRunOnUIThread(callbacks, results, subscribes);
 	}
 
 	/**

@@ -18,6 +18,7 @@ package im.delight.android.ddp.db.memory;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+
 import im.delight.android.ddp.db.Collection;
 import im.delight.android.ddp.db.Document;
 import im.delight.android.ddp.db.Query;

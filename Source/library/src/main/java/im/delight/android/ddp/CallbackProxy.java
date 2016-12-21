@@ -20,13 +20,15 @@ import android.os.Handler;
 import android.os.Looper;
 
 import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /** Wrapper that executes all registered callbacks on the correct thread behind the scenes */
 public class CallbackProxy implements MeteorCallback {
+
+	private boolean runCallbacksOnUIThread = false;
+	private boolean runResultsOnUIThread = false;
+	private boolean runSubscribesOnUIThread = false;
 
 	private final Queue<MeteorCallback> mCallbacks = new ConcurrentLinkedQueue<MeteorCallback>();
 	private final Handler mUiHandler = new Handler(Looper.getMainLooper());
@@ -45,6 +47,12 @@ public class CallbackProxy implements MeteorCallback {
 		mCallbacks.clear();
 	}
 
+	public void setRunOnUIThread(boolean callbacks, boolean results, boolean subscribes) {
+		this.runCallbacksOnUIThread = callbacks;
+		this.runResultsOnUIThread = results;
+		this.runSubscribesOnUIThread = subscribes;
+	}
+
 	@Override
 	public void onConnect(final boolean signedInAutomatically) {
 		// iterate over all the registered callbacks
@@ -53,15 +61,11 @@ public class CallbackProxy implements MeteorCallback {
 			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
-				// execute the callback on the main thread
-				mUiHandler.post(new Runnable() {
-
+				runCallbacksOnUIThreadIfNeeded(new Runnable() {
 					@Override
 					public void run() {
-						// run the proxied method with the same parameters
 						callback.onConnect(signedInAutomatically);
 					}
-
 				});
 			}
 		}
@@ -75,15 +79,11 @@ public class CallbackProxy implements MeteorCallback {
 			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
-				// execute the callback on the main thread
-				mUiHandler.post(new Runnable() {
-
+				runCallbacksOnUIThreadIfNeeded(new Runnable() {
 					@Override
 					public void run() {
-						// run the proxied method with the same parameters
 						callback.onDisconnect();
 					}
-
 				});
 			}
 		}
@@ -97,15 +97,11 @@ public class CallbackProxy implements MeteorCallback {
 			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
-				// execute the callback on the main thread
-				mUiHandler.post(new Runnable() {
-
+				runCallbacksOnUIThreadIfNeeded(new Runnable() {
 					@Override
 					public void run() {
-						// run the proxied method with the same parameters
 						callback.onDataAdded(collectionName, documentID, newValuesJson);
 					}
-
 				});
 			}
 		}
@@ -119,15 +115,11 @@ public class CallbackProxy implements MeteorCallback {
 			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
-				// execute the callback on the main thread
-				mUiHandler.post(new Runnable() {
-
+				runCallbacksOnUIThreadIfNeeded(new Runnable() {
 					@Override
 					public void run() {
-						// run the proxied method with the same parameters
 						callback.onDataChanged(collectionName, documentID, updatedValuesJson, removedValuesJson);
 					}
-
 				});
 			}
 		}
@@ -141,15 +133,11 @@ public class CallbackProxy implements MeteorCallback {
 			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
-				// execute the callback on the main thread
-				mUiHandler.post(new Runnable() {
-
+				runCallbacksOnUIThreadIfNeeded(new Runnable() {
 					@Override
 					public void run() {
-						// run the proxied method with the same parameters
 						callback.onDataRemoved(collectionName, documentID);
 					}
-
 				});
 			}
 		}
@@ -163,15 +151,11 @@ public class CallbackProxy implements MeteorCallback {
 			final MeteorCallback callback = callbacksIterator.next();
 			// if the callback exists
 			if (callback != null) {
-				// execute the callback on the main thread
-				mUiHandler.post(new Runnable() {
-
+				runCallbacksOnUIThreadIfNeeded(new Runnable() {
 					@Override
 					public void run() {
-						// run the proxied method with the same parameters
 						callback.onException(e);
 					}
-
 				});
 			}
 		}
@@ -184,15 +168,11 @@ public class CallbackProxy implements MeteorCallback {
 			public void onSuccess(final String result) {
 				// if the callback exists
 				if (callback != null) {
-					// execute the callback on the main thread
-					mUiHandler.post(new Runnable() {
-
+					runResultsOnUIThreadIfNeeded(new Runnable() {
 						@Override
 						public void run() {
-							// run the proxied method with the same parameters
 							callback.onSuccess(result);
 						}
-
 					});
 				}
 			}
@@ -201,15 +181,11 @@ public class CallbackProxy implements MeteorCallback {
 			public void onError(final String error, final String reason, final String details) {
 				// if the callback exists
 				if (callback != null) {
-					// execute the callback on the main thread
-					mUiHandler.post(new Runnable() {
-
+					runResultsOnUIThreadIfNeeded(new Runnable() {
 						@Override
 						public void run() {
-							// run the proxied method with the same parameters
 							callback.onError(error, reason, details);
 						}
-
 					});
 				}
 			}
@@ -224,15 +200,11 @@ public class CallbackProxy implements MeteorCallback {
 			public void onSuccess() {
 				// if the callback exists
 				if (callback != null) {
-					// execute the callback on the main thread
-					mUiHandler.post(new Runnable() {
-
+					runSubscribesOnUIThreadIfNeeded(new Runnable() {
 						@Override
 						public void run() {
-							// run the proxied method with the same parameters
 							callback.onSuccess();
 						}
-
 					});
 				}
 			}
@@ -241,15 +213,11 @@ public class CallbackProxy implements MeteorCallback {
 			public void onError(final String error, final String reason, final String details) {
 				// if the callback exists
 				if (callback != null) {
-					// execute the callback on the main thread
-					mUiHandler.post(new Runnable() {
-
+					runSubscribesOnUIThreadIfNeeded(new Runnable() {
 						@Override
 						public void run() {
-							// run the proxied method with the same parameters
 							callback.onError(error, reason, details);
 						}
-
 					});
 				}
 			}
@@ -259,25 +227,56 @@ public class CallbackProxy implements MeteorCallback {
 
 	public UnsubscribeListener forUnsubscribeListener(final UnsubscribeListener callback) {
 		return new UnsubscribeListener() {
-
 			@Override
 			public void onSuccess() {
 				// if the callback exists
 				if (callback != null) {
-					// execute the callback on the main thread
-					mUiHandler.post(new Runnable() {
-
+					runSubscribesOnUIThreadIfNeeded(new Runnable() {
 						@Override
 						public void run() {
-							// run the proxied method with the same parameters
 							callback.onSuccess();
 						}
-
 					});
 				}
 			}
 
 		};
+	}
+
+	public SubscriptionListener forSubscriptionListener(final SubscriptionListener listener) {
+		return new SubscriptionListener() {
+
+			@Override
+			public void onSubscriptionReady(final boolean ready) {
+				if (listener != null) {
+					runCallbacksOnUIThreadIfNeeded(new Runnable() {
+						@Override
+						public void run() {
+							listener.onSubscriptionReady(ready);
+						}
+					});
+				}
+			}
+		};
+	}
+
+	public void runCallbacksOnUIThreadIfNeeded(Runnable runnable) {
+		this.runOnUIThreadIfNeeded(this.runCallbacksOnUIThread, runnable);
+	}
+
+	public void runResultsOnUIThreadIfNeeded(Runnable runnable) {
+		this.runOnUIThreadIfNeeded(this.runResultsOnUIThread, runnable);
+	}
+
+	public void runSubscribesOnUIThreadIfNeeded(Runnable runnable) {
+		this.runOnUIThreadIfNeeded(this.runSubscribesOnUIThread, runnable);
+	}
+
+	private void runOnUIThreadIfNeeded(boolean runOnUIThread, Runnable runnable) {
+		// execute the callback on the main thread
+		if (runOnUIThread) this.mUiHandler.post(runnable);
+			// or the current thread
+		else runnable.run();
 	}
 
 }

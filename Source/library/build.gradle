@@ -27,7 +27,8 @@ android {
 dependencies {
 	compile files('libs/jackson-core-asl-1.9.7.jar')
 	compile files('libs/jackson-mapper-asl-1.9.7.jar')
-	compile files('libs/tubesock-0.0.13-SNAPSHOT.jar')
+//	compile files('libs/tubesock-0.0.13-SNAPSHOT.jar')
+	compile files('libs/tubesock-0.0.14.jar')
 }
 
 task sourcesJar(type: Jar) {

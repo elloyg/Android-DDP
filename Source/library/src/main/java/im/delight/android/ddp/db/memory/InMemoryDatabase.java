@@ -16,11 +16,12 @@ package im.delight.android.ddp.db.memory;
  * limitations under the License.
  */
 
+import java.util.HashMap;
+
+import im.delight.android.ddp.Fields;
 import im.delight.android.ddp.Meteor;
 import im.delight.android.ddp.db.Collection;
 import im.delight.android.ddp.db.Database;
-import im.delight.android.ddp.Fields;
-import java.util.HashMap;
 
 /** Database that is stored in memory */
 public final class InMemoryDatabase implements Database {

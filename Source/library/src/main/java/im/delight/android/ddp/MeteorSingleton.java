@@ -16,8 +16,9 @@ package im.delight.android.ddp;
  * limitations under the License.
  */
 
-import im.delight.android.ddp.db.DataStore;
 import android.content.Context;
+
+import im.delight.android.ddp.db.DataStore;
 
 /** Provides a single access point to the `Meteor` class that can be used across `Activity` instances */
 public class MeteorSingleton extends Meteor {

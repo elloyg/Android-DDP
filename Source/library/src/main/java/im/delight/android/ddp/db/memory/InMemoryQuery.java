@@ -16,10 +16,11 @@ package im.delight.android.ddp.db.memory;
  * limitations under the License.
  */
 
-import im.delight.android.ddp.db.Document;
-import im.delight.android.ddp.db.Query;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+
+import im.delight.android.ddp.db.Document;
+import im.delight.android.ddp.db.Query;
 
 /** Query that operates on a collection stored in memory */
 public final class InMemoryQuery implements Query {
