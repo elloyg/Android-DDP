@@ -1,13 +1,13 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 19
-    buildToolsVersion "23.0.1"
+    compileSdkVersion 25
+    buildToolsVersion "25.0.2"
 
     defaultConfig {
         applicationId "im.delight.android.ddp.examples"
         minSdkVersion 9
-        targetSdkVersion 19
+        targetSdkVersion 25
     }
 
     buildTypes {

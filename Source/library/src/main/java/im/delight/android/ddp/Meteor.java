@@ -729,7 +729,9 @@ public class Meteor {
 							}
 
 							final Subscription subscription = mSubscriptions.get(subscriptionId);
-							subscription.setReady(true);
+							if (subscription != null) {
+								subscription.setReady(true);
+							}
 						}
 					}
 				}
