@@ -18,9 +18,16 @@ package im.delight.android.ddp;
 
 import im.delight.android.ddp.db.DataStore;
 import im.delight.android.ddp.db.Database;
-import java.net.URI;
 import android.content.SharedPreferences;
 import android.content.Context;
+import com.neovisionaries.ws.client.WebSocket;
+import com.neovisionaries.ws.client.WebSocketAdapter;
+import com.neovisionaries.ws.client.WebSocketException;
+import com.neovisionaries.ws.client.WebSocketFactory;
+import com.neovisionaries.ws.client.WebSocketFrame;
+import com.neovisionaries.ws.client.WebSocketListener;
+import com.neovisionaries.ws.client.WebSocketState;
+import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.Queue;
 import java.util.Iterator;
@@ -32,10 +39,6 @@ import org.codehaus.jackson.JsonProcessingException;
 import org.codehaus.jackson.JsonNode;
 import java.util.HashMap;
 import java.util.Map;
-import com.firebase.tubesock.WebSocket;
-import com.firebase.tubesock.WebSocketEventHandler;
-import com.firebase.tubesock.WebSocketMessage;
-import com.firebase.tubesock.WebSocketException;
 
 /** Client that connects to Meteor servers implementing the DDP protocol */
 public class Meteor {
@@ -50,7 +53,7 @@ public class Meteor {
 	/** The WebSocket connection that will be used for the data transfer */
 	private WebSocket mWebSocket;
 	/** The callback that handles messages and events received from the WebSocket connection */
-	private final WebSocketEventHandler mWebSocketEventHandler;
+	private final WebSocketListener mWebSocketListener;
 	/** Map that tracks all pending Listener instances */
 	private final Map<String, Listener> mListeners;
 	/** Messages that couldn't be dispatched yet and thus had to be queued */
@@ -133,27 +136,31 @@ public class Meteor {
 		mDataStore = dataStore;
 
 		// create a new handler that processes the messages and events received from the WebSocket connection
-		mWebSocketEventHandler = new WebSocketEventHandler() {
+		mWebSocketListener = new WebSocketAdapter() {
 
 			@Override
-			public void onOpen() {
+			public void onConnected(final WebSocket websocket, final Map<String, List<String>> headers) {
 				log(TAG);
 				log("  onOpen");
 
 				mConnected = true;
 				mReconnectAttempts = 0;
+
 				initConnection(mSessionID);
 			}
 
 			@Override
-			public void onClose() {
+			public void onDisconnected(final WebSocket websocket, final WebSocketFrame serverCloseFrame, final WebSocketFrame clientCloseFrame, final boolean closedByServer) {
 				log(TAG);
 				log("  onClose");
 
 				final boolean lostConnection = mConnected;
+
 				mConnected = false;
+
 				if (lostConnection) {
 					mReconnectAttempts++;
+
 					if (mReconnectAttempts <= RECONNECT_ATTEMPTS_MAX) {
 						// try to re-connect automatically
 						reconnect();
@@ -167,27 +174,26 @@ public class Meteor {
 			}
 
 			@Override
-			public void onMessage(final WebSocketMessage message) {
+			public void onTextMessage(final WebSocket websocket, final String text) {
 				log(TAG);
 				log("  onTextMessage");
+				log("    payload == "+text);
 
-				if (message.isText()) {
-					log("    payload == "+message.getText());
-					handleMessage(message.getText());
-				}
-				else {
-					log("    binary");
-					log("      ignored");
-				}
+				handleMessage(text);
 			}
 
 			@Override
-			public void onError(final WebSocketException e) {
-				mCallbackProxy.onException(e);
+			public void onStateChanged(final WebSocket websocket, final WebSocketState newState) {}
+
+			@Override
+			public void handleCallbackError(final WebSocket websocket, final Throwable cause) {
+				mCallbackProxy.onException(new Exception(cause));
 			}
 
 			@Override
-			public void onLogMessage(final String msg) { }
+			public void onError(final WebSocket websocket, final WebSocketException cause) {
+				mCallbackProxy.onException(new Exception(cause));
+			}
 
 		};
 
@@ -199,8 +205,10 @@ public class Meteor {
 
 		// save the server URI
 		mServerUri = serverUri;
+
 		// try with the preferred DDP protocol version first
 		mDdpVersion = protocolVersion;
+
 		// count the number of failed attempts to re-connect
 		mReconnectAttempts = 0;
 	}
@@ -238,17 +246,17 @@ public class Meteor {
 		}
 
 		// create a new WebSocket connection for the data transfer
-		mWebSocket = new WebSocket(URI.create(mServerUri));
-
-		// attach the handler to the connection
-		mWebSocket.setEventHandler(mWebSocketEventHandler);
-
 		try {
-			mWebSocket.connect();
+			mWebSocket = new WebSocketFactory().setConnectionTimeout(30000).createSocket(mServerUri);
 		}
-		catch (WebSocketException e) {
+		catch (final IOException e) {
 			mCallbackProxy.onException(e);
 		}
+
+		mWebSocket.setMissingCloseFrameAllowed(true);
+		mWebSocket.setPingInterval(25 * 1000);
+		mWebSocket.addListener(mWebSocketListener);
+		mWebSocket.connectAsynchronously();
 	}
 
 	/**
@@ -258,12 +266,15 @@ public class Meteor {
 	 */
 	private void initConnection(final String existingSessionID) {
 		final Map<String, Object> data = new HashMap<String, Object>();
+
 		data.put(Protocol.Field.MESSAGE, Protocol.Message.CONNECT);
 		data.put(Protocol.Field.VERSION, mDdpVersion);
 		data.put(Protocol.Field.SUPPORT, SUPPORTED_DDP_VERSIONS);
+
 		if (existingSessionID != null) {
 			data.put(Protocol.Field.SESSION, existingSessionID);
 		}
+
 		send(data);
 	}
 
@@ -275,7 +286,7 @@ public class Meteor {
 
 		if (mWebSocket != null) {
 			try {
-				mWebSocket.close();
+				mWebSocket.disconnect();
 			}
 			catch (Exception e) {
 				mCallbackProxy.onException(e);
@@ -321,7 +332,7 @@ public class Meteor {
 			log("    dispatching");
 
 			if (mWebSocket != null) {
-				mWebSocket.send(message);
+				mWebSocket.sendText(message);
 			}
 			else {
 				throw new IllegalStateException("You must have called the 'connect' method before you can send data");
@@ -398,6 +409,7 @@ public class Meteor {
 	 */
 	private void handleMessage(final String payload) {
 		final JsonNode data;
+
 		try {
 			data = mObjectMapper.readTree(payload);
 		}
@@ -443,6 +455,7 @@ public class Meteor {
 				}
 				else if (message.equals(Protocol.Message.PING)) {
 					final String id;
+
 					if (data.has(Protocol.Field.ID)) {
 						id = data.get(Protocol.Field.ID).getTextValue();
 					}
@@ -454,6 +467,7 @@ public class Meteor {
 				}
 				else if (message.equals(Protocol.Message.ADDED) || message.equals(Protocol.Message.ADDED_BEFORE)) {
 					final String documentID;
+
 					if (data.has(Protocol.Field.ID)) {
 						documentID = data.get(Protocol.Field.ID).getTextValue();
 					}
@@ -462,6 +476,7 @@ public class Meteor {
 					}
 
 					final String collectionName;
+
 					if (data.has(Protocol.Field.COLLECTION)) {
 						collectionName = data.get(Protocol.Field.COLLECTION).getTextValue();
 					}
@@ -470,6 +485,7 @@ public class Meteor {
 					}
 
 					final String newValuesJson;
+
 					if (data.has(Protocol.Field.FIELDS)) {
 						newValuesJson = data.get(Protocol.Field.FIELDS).toString();
 					}
@@ -485,6 +501,7 @@ public class Meteor {
 				}
 				else if (message.equals(Protocol.Message.CHANGED)) {
 					final String documentID;
+
 					if (data.has(Protocol.Field.ID)) {
 						documentID = data.get(Protocol.Field.ID).getTextValue();
 					}
@@ -493,6 +510,7 @@ public class Meteor {
 					}
 
 					final String collectionName;
+
 					if (data.has(Protocol.Field.COLLECTION)) {
 						collectionName = data.get(Protocol.Field.COLLECTION).getTextValue();
 					}
@@ -501,6 +519,7 @@ public class Meteor {
 					}
 
 					final String updatedValuesJson;
+
 					if (data.has(Protocol.Field.FIELDS)) {
 						updatedValuesJson = data.get(Protocol.Field.FIELDS).toString();
 					}
@@ -509,6 +528,7 @@ public class Meteor {
 					}
 
 					final String removedValuesJson;
+
 					if (data.has(Protocol.Field.CLEARED)) {
 						removedValuesJson = data.get(Protocol.Field.CLEARED).toString();
 					}
@@ -524,6 +544,7 @@ public class Meteor {
 				}
 				else if (message.equals(Protocol.Message.REMOVED)) {
 					final String documentID;
+
 					if (data.has(Protocol.Field.ID)) {
 						documentID = data.get(Protocol.Field.ID).getTextValue();
 					}
@@ -532,6 +553,7 @@ public class Meteor {
 					}
 
 					final String collectionName;
+
 					if (data.has(Protocol.Field.COLLECTION)) {
 						collectionName = data.get(Protocol.Field.COLLECTION).getTextValue();
 					}
@@ -562,6 +584,7 @@ public class Meteor {
 					}
 
 					final String id;
+
 					if (data.has(Protocol.Field.ID)) {
 						id = data.get(Protocol.Field.ID).getTextValue();
 					}
@@ -575,6 +598,7 @@ public class Meteor {
 						mListeners.remove(id);
 
 						final String result;
+
 						if (data.has(Protocol.Field.RESULT)) {
 							result = data.get(Protocol.Field.RESULT).toString();
 						}
@@ -595,6 +619,7 @@ public class Meteor {
 					if (data.has(Protocol.Field.SUBS)) {
 						final Iterator<JsonNode> elements = data.get(Protocol.Field.SUBS).getElements();
 						String subscriptionId;
+
 						while (elements.hasNext()) {
 							subscriptionId = elements.next().getTextValue();
 
@@ -610,6 +635,7 @@ public class Meteor {
 				}
 				else if (message.equals(Protocol.Message.NOSUB)) {
 					final String subscriptionId;
+
 					if (data.has(Protocol.Field.ID)) {
 						subscriptionId = data.get(Protocol.Field.ID).getTextValue();
 					}
@@ -685,10 +711,13 @@ public class Meteor {
 	 */
 	private void sendPong(final String id) {
 		final Map<String, Object> data = new HashMap<String, Object>();
+
 		data.put(Protocol.Field.MESSAGE, Protocol.Message.PONG);
+
 		if (id != null) {
 			data.put(Protocol.Field.ID, id);
 		}
+
 		send(data);
 	}
 
@@ -796,8 +825,9 @@ public class Meteor {
 	 * @param listener the listener to call on success/error
 	 */
 	public void remove(final String collectionName, final String documentId, final ResultListener listener) {
-		Map<String, Object> query = new HashMap<String, Object>();
+		final Map<String, Object> query = new HashMap<String, Object>();
 		query.put(MongoDb.Field.ID, documentId);
+
 		call("/"+collectionName+"/remove", new Object[] { query }, listener);
 	}
 
@@ -839,6 +869,7 @@ public class Meteor {
 	 */
 	private void login(final String username, final String email, final String password, final ResultListener listener) {
 		final Map<String, Object> userData = new HashMap<String, Object>();
+
 		if (username != null) {
 			userData.put("username", username);
 		}
@@ -934,13 +965,17 @@ public class Meteor {
 		}
 
 		final Map<String, Object> accountData = new HashMap<String, Object>();
+
 		if (username != null) {
 			accountData.put("username", username);
 		}
+
 		if (email != null) {
 			accountData.put("email", email);
 		}
+
 		accountData.put("password", password);
+
 		if (profile != null) {
 			accountData.put("profile", profile);
 		}
@@ -1026,17 +1061,20 @@ public class Meteor {
 			mListeners.put(callId, listener);
 		}
 
-		// send the request
 		final Map<String, Object> data = new HashMap<String, Object>();
+
 		data.put(Protocol.Field.MESSAGE, Protocol.Message.METHOD);
 		data.put(Protocol.Field.METHOD, methodName);
 		data.put(Protocol.Field.ID, callId);
+
 		if (params != null) {
 			data.put(Protocol.Field.PARAMS, params);
 		}
+
 		if (randomSeed != null) {
 			data.put(Protocol.Field.RANDOM_SEED, randomSeed);
 		}
+
 		send(data);
 	}
 
@@ -1078,14 +1116,16 @@ public class Meteor {
 			mListeners.put(subscriptionId, listener);
 		}
 
-		// send the request
 		final Map<String, Object> data = new HashMap<String, Object>();
+
 		data.put(Protocol.Field.MESSAGE, Protocol.Message.SUBSCRIBE);
 		data.put(Protocol.Field.NAME, subscriptionName);
 		data.put(Protocol.Field.ID, subscriptionId);
+
 		if (params != null) {
 			data.put(Protocol.Field.PARAMS, params);
 		}
+
 		send(data);
 
 		// return the generated subscription ID
@@ -1113,10 +1153,10 @@ public class Meteor {
 			mListeners.put(subscriptionId, listener);
 		}
 
-		// send the request
 		final Map<String, Object> data = new HashMap<String, Object>();
 		data.put(Protocol.Field.MESSAGE, Protocol.Message.UNSUBSCRIBE);
 		data.put(Protocol.Field.ID, subscriptionId);
+
 		send(data);
 	}
 
@@ -1135,8 +1175,7 @@ public class Meteor {
 	 * @param token the login token to save
 	 */
 	private void saveLoginToken(final String token) {
-		final SharedPreferences prefs = getSharedPreferences();
-		final SharedPreferences.Editor editor = prefs.edit();
+		final SharedPreferences.Editor editor = getSharedPreferences().edit();
 		editor.putString(Preferences.Keys.LOGIN_TOKEN, token);
 		editor.apply();
 	}

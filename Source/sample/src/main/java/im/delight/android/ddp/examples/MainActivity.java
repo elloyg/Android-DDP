@@ -38,7 +38,7 @@ public class MainActivity extends Activity implements MeteorCallback {
 		Meteor.setLoggingEnabled(true);
 
 		// create a new instance
-		mMeteor = new Meteor(this, "ws://android-ddp-meteor.meteor.com/websocket", new InMemoryDatabase());
+		mMeteor = new Meteor(this, "ws://www.meteor.com/websocket", new InMemoryDatabase());
 
 		// register the callback that will handle events and receive messages
 		mMeteor.addCallback(this);
@@ -92,7 +92,7 @@ public class MainActivity extends Activity implements MeteorCallback {
 		}
 
 		// subscribe to data from the server
-		String subscriptionId = mMeteor.subscribe("publicMessages");
+		String subscriptionId = mMeteor.subscribe("meetups");
 
 		// unsubscribe from data again (usually done later or not at all)
 		mMeteor.unsubscribe(subscriptionId);
