@@ -6,7 +6,7 @@ android {
 
     defaultConfig {
         applicationId "im.delight.android.ddp.examples"
-        minSdkVersion 9
+        minSdkVersion 16
         targetSdkVersion 25
     }
 

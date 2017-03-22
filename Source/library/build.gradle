@@ -6,7 +6,7 @@ android {
 	buildToolsVersion "25.0.2"
 
 	defaultConfig {
-		minSdkVersion 9
+		minSdkVersion 16
 		targetSdkVersion 25
 	}
 
@@ -27,8 +27,7 @@ android {
 dependencies {
 	compile files('libs/jackson-core-asl-1.9.7.jar')
 	compile files('libs/jackson-mapper-asl-1.9.7.jar')
-//	compile files('libs/tubesock-0.0.13-SNAPSHOT.jar')
-	compile files('libs/tubesock-0.0.14.jar')
+	compile 'com.neovisionaries:nv-websocket-client:1.31'
 }
 
 task sourcesJar(type: Jar) {

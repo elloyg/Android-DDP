@@ -35,7 +35,7 @@ Connect your native Android apps, written in Java, to apps built with the [Meteo
 
      ```gradle
      dependencies {
-         compile 'com.github.delight-im:Android-DDP:v3.1.2'
+         compile 'com.github.delight-im:Android-DDP:v3.3.0'
      }
      ```
 
@@ -378,6 +378,18 @@ Query query = mMeteor.getDatabase().getCollection(collectionName).whereNull(fiel
 Query query = mMeteor.getDatabase().getCollection(collectionName).whereNotNull(fieldName);
 ```
 
+```java
+// String fieldName = "age";
+// Integer[] fieldValues = new Integer[] { 60, 70, 80 };
+Query query = mMeteor.getDatabase().getCollection(collectionName).whereIn(fieldName, fieldValues);
+```
+
+```java
+// String fieldName = "languageCode";
+// String[] fieldValues = new String[] { "zh", "es", "en", "hi", "ar" };
+Query query = mMeteor.getDatabase().getCollection(collectionName).whereNotIn(fieldName, fieldValues);
+```
+
 Any query can be executed by a `find` or `findOne` call. The step of first creating the `Query` instance can be skipped if you chain the calls to execute the query immediately.
 
 ```java
@@ -430,7 +442,7 @@ All contributions are welcome! If you wish to contribute, please create an issue
 
 ## Dependencies
 
- * [TubeSock](https://github.com/firebase/TubeSock) — [Firebase](https://github.com/firebase) — [MIT License](http://firebase.mit-license.org/)
+ * [nv-websocket-client](https://github.com/TakahikoKawasaki/nv-websocket-client) — [Takahiko Kawasaki](https://github.com/TakahikoKawasaki) — [Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0.html)
  * [Jackson Core](https://github.com/FasterXML/jackson-core) — [FasterXML](https://github.com/FasterXML) — [Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0.html)
  * [Jackson ObjectMapper](https://github.com/FasterXML/jackson-databind) — [FasterXML](https://github.com/FasterXML) — [Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0.html)
 
